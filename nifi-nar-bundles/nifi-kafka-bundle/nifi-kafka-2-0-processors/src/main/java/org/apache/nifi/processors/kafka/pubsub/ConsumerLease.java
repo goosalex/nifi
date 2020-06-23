@@ -73,6 +73,7 @@ import static org.apache.nifi.processors.kafka.pubsub.KafkaProcessorUtils.UTF8_E
 public abstract class ConsumerLease implements Closeable, ConsumerRebalanceListener {
 
     private final long maxWaitMillis;
+    private final int  maxPollRecords;
     private final Consumer<byte[], byte[]> kafkaConsumer;
     private final ComponentLog logger;
     private final byte[] demarcatorBytes;
@@ -94,6 +95,7 @@ public abstract class ConsumerLease implements Closeable, ConsumerRebalanceListe
 
     ConsumerLease(
             final long maxWaitMillis,
+            final int  maxPollRecords,
             final Consumer<byte[], byte[]> kafkaConsumer,
             final byte[] demarcatorBytes,
             final String keyEncoding,
@@ -105,6 +107,7 @@ public abstract class ConsumerLease implements Closeable, ConsumerRebalanceListe
             final Charset headerCharacterSet,
             final Pattern headerNamePattern) {
         this.maxWaitMillis = maxWaitMillis;
+        this.maxPollRecords = maxPollRecords;
         this.kafkaConsumer = kafkaConsumer;
         this.demarcatorBytes = demarcatorBytes;
         this.keyEncoding = keyEncoding;
@@ -252,6 +255,7 @@ public abstract class ConsumerLease implements Closeable, ConsumerRebalanceListe
     boolean continuePolling() {
         //stop if the last poll produced new no data
         if (lastPollEmpty) {
+            logger.trace("Returning because lastPollEmpty");
             return false;
         }
 
@@ -261,14 +265,17 @@ public abstract class ConsumerLease implements Closeable, ConsumerRebalanceListe
         }
         final long durationMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - leaseStartNanos);
         if (durationMillis > maxWaitMillis) {
+            logger.trace("Returning because max uncommitted wait time past limit");
             return false;
         }
 
         //stop if we've generated enough flowfiles that we need to be concerned about memory usage for the objects
         if (bundleMap.size() > 200) { //a magic number - the number of simultaneous bundles to track
+            logger.trace("Returning because bundle Map Size > 200");
             return false;
         } else {
-            return totalMessages < 1000;//admittedlly a magic number - good candidate for processor property
+            if (! (totalMessages < maxPollRecords)) logger.trace(String.format("Returning because totalMessages %d > %d",new Object[]{totalMessages,maxPollRecords}));
+            return totalMessages < maxPollRecords;//admittedlly a magic number - good candidate for processor property
         }
     }
 
