@@ -265,16 +265,16 @@ public abstract class ConsumerLease implements Closeable, ConsumerRebalanceListe
         }
         final long durationMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - leaseStartNanos);
         if (durationMillis > maxWaitMillis) {
-            logger.trace("Returning because max uncommitted wait time past limit");
+            logger.debug("Returning because max uncommitted wait time past limit");
             return false;
         }
 
         //stop if we've generated enough flowfiles that we need to be concerned about memory usage for the objects
         if (bundleMap.size() > 200) { //a magic number - the number of simultaneous bundles to track
-            logger.trace("Returning because bundle Map Size > 200");
+            logger.debug("Returning because bundle Map Size > 200");
             return false;
         } else {
-            if (! (totalMessages < maxPollRecords)) logger.trace(String.format("Returning because totalMessages %d > %d",new Object[]{totalMessages,maxPollRecords}));
+            if (! (totalMessages < maxPollRecords)) logger.debug(String.format("Returning because totalMessages %d > %d",new Object[]{totalMessages,maxPollRecords}));
             return totalMessages < maxPollRecords;//admittedlly a magic number - good candidate for processor property
         }
     }
