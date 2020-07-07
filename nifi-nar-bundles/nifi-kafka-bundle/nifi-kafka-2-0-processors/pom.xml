@@ -20,7 +20,12 @@
     </parent>
     <modelVersion>4.0.0</modelVersion>
     <artifactId>nifi-kafka-2-0-processors</artifactId>
+    <version>1.11.4-FIX</version>
     <packaging>jar</packaging>
+    <properties>
+        <maven.compiler.target>1.8</maven.compiler.target>
+        <maven.compiler.source>1.8</maven.compiler.source>
+    </properties>
     <dependencies>
         <dependency>
             <groupId>org.apache.nifi</groupId>
