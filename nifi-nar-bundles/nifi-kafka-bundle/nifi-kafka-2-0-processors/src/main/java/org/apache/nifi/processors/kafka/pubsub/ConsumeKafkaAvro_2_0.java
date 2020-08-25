@@ -177,18 +177,7 @@ public class ConsumeKafkaAvro_2_0 extends AbstractProcessor {
         }
     }
 
-    static final PropertyDescriptor MESSAGE_DEMARCATOR = new PropertyDescriptor.Builder()
-            .name("message-demarcator")
-            .displayName("Message Demarcator")
-            .required(false)
-            .addValidator(Validator.VALID)
-            .expressionLanguageSupported(ExpressionLanguageScope.VARIABLE_REGISTRY)
-            .description("Since KafkaConsumer receives messages in batches, you have an option to output FlowFiles which contains "
-                    + "all Kafka messages in a single batch for a given topic and partition and this property allows you to provide a string (interpreted as UTF-8) to use "
-                    + "for demarcating apart multiple Kafka messages. This is an optional property and if not provided each Kafka message received "
-                    + "will result in a single FlowFile which  "
-                    + "time it is triggered. To enter special character such as 'new line' use CTRL+Enter or Shift+Enter depending on the OS")
-            .build();
+
     static final PropertyDescriptor HEADER_NAME_REGEX = new PropertyDescriptor.Builder()
         .name("header-name-regex")
         .displayName("Headers to Add as Attributes (Regex)")
@@ -335,20 +324,19 @@ public class ConsumeKafkaAvro_2_0 extends AbstractProcessor {
         final int maxLeases = context.getMaxConcurrentTasks();
         final long maxUncommittedTime = context.getProperty(MAX_UNCOMMITTED_TIME).asTimePeriod(TimeUnit.MILLISECONDS);
         final int  maxPollRecords      = context.getProperty(MAX_POLL_RECORDS).asInteger();
-        final byte[] demarcator = context.getProperty(ConsumeKafkaAvro_2_0.MESSAGE_DEMARCATOR).isSet()
-                ? context.getProperty(ConsumeKafkaAvro_2_0.MESSAGE_DEMARCATOR).evaluateAttributeExpressions().getValue().getBytes(StandardCharsets.UTF_8)
-                : null;
+        final byte[] demarcator = null;
 
         final SchemaRegistry schemaRegistry = context.getProperty(SCHEMA_SERVICE).asControllerService(SchemaRegistry.class);
         final SchemaAccessStrategy schemaAccessStrategy;
 
 
 
-        if (context.getControllerServiceLookup().getControllerServiceName(context.getProperty(SCHEMA_SERVICE).getValue()).endsWith("ConfluentSchemaRegistry"))
+        if (context.getControllerServiceLookup().getControllerService(context.getProperty(SCHEMA_SERVICE).getValue()).toString().startsWith("ConfluentSchemaRegistry"))
             schemaAccessStrategy = new ConfluentSchemaRegistryStrategy(schemaRegistry);
-        else
+        else {
+            getLogger().warn("no Schema Registry found, but:" + context.getControllerServiceLookup().getControllerServiceName(context.getProperty(SCHEMA_SERVICE).getValue()));
             schemaAccessStrategy = null;
-
+        }
         final CodecFactory   codecFactory = getCodecFactory(context.getProperty(AVRO_CODEC).getValue());
 
         final Map<String, Object> props = new HashMap<>();
