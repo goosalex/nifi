@@ -39,6 +39,7 @@ import org.apache.nifi.processor.Relationship;
 import org.apache.nifi.processor.exception.ProcessException;
 import org.apache.nifi.processor.util.StandardValidators;
 import org.apache.nifi.schema.access.ConfluentSchemaRegistryStrategy;
+import org.apache.nifi.schema.access.HortonworksEncodedSchemaReferenceStrategy;
 import org.apache.nifi.schema.access.SchemaAccessStrategy;
 import org.apache.nifi.schemaregistry.services.SchemaRegistry;
 
@@ -51,8 +52,9 @@ import java.util.regex.Pattern;
 import static org.apache.nifi.processors.kafka.pubsub.KafkaProcessorUtils.HEX_ENCODING;
 import static org.apache.nifi.processors.kafka.pubsub.KafkaProcessorUtils.UTF8_ENCODING;
 
-@CapabilityDescription("Consumes messages from Apache Kafka specifically built against the Kafka 2.0 Consumer API. "
-    + "The complementary NiFi processor for sending messages is PublishKafka_2_0.")
+@CapabilityDescription("Consumes Avro messages from Apache Kafka specifically built against the Kafka 2.0 Consumer API and encoded using the Confluent or Hortonworks Schema Registry."
+        + "The records are not modified but saved, as they are, in a Avro Datafile."
+    + "The complementary NiFi processor for sending messages is PublishKafkaRecord_2_0, configured with AvroRecordSetWriter using a compatible Schema Registry.")
 @Tags({"Kafka", "Get", "Ingest", "Ingress", "Topic", "PubSub", "Consume", "2.0"})
 @WritesAttributes({
     @WritesAttribute(attribute = KafkaProcessorUtils.KAFKA_COUNT, description = "The number of messages written if more than one"),
@@ -195,7 +197,7 @@ public class ConsumeKafkaAvro_2_0 extends AbstractProcessor {
     static final PropertyDescriptor MAX_POLL_RECORDS = new PropertyDescriptor.Builder()
             .name("max.poll.records")
             .displayName("Max Poll Records")
-            .description("Specifies the maximum number of records Kafka should return in a single poll.")
+            .description("Specifies the maximum number of records Kafka should return in a single poll. Note: this is calculated as the sum over all flowfiles returned during one poll (e.g. one per Partition)")
             .required(false)
             .defaultValue("10000")
             .addValidator(StandardValidators.POSITIVE_INTEGER_VALIDATOR)
@@ -324,7 +326,6 @@ public class ConsumeKafkaAvro_2_0 extends AbstractProcessor {
         final int maxLeases = context.getMaxConcurrentTasks();
         final long maxUncommittedTime = context.getProperty(MAX_UNCOMMITTED_TIME).asTimePeriod(TimeUnit.MILLISECONDS);
         final int  maxPollRecords      = context.getProperty(MAX_POLL_RECORDS).asInteger();
-        final byte[] demarcator = null;
 
         final SchemaRegistry schemaRegistry = context.getProperty(SCHEMA_SERVICE).asControllerService(SchemaRegistry.class);
         final SchemaAccessStrategy schemaAccessStrategy;
@@ -333,8 +334,11 @@ public class ConsumeKafkaAvro_2_0 extends AbstractProcessor {
 
         if (context.getControllerServiceLookup().getControllerService(context.getProperty(SCHEMA_SERVICE).getValue()).toString().startsWith("ConfluentSchemaRegistry"))
             schemaAccessStrategy = new ConfluentSchemaRegistryStrategy(schemaRegistry);
+        else if (context.getControllerServiceLookup().getControllerService(context.getProperty(SCHEMA_SERVICE).getValue()).toString().startsWith("HortonworksSchemaRegistry"))
+            schemaAccessStrategy = new HortonworksEncodedSchemaReferenceStrategy(schemaRegistry);
         else {
-            getLogger().warn("no Schema Registry found, but:" + context.getControllerServiceLookup().getControllerServiceName(context.getProperty(SCHEMA_SERVICE).getValue()));
+            getLogger().warn(String.format("no Schema Registry found, but (%s). Kafka Records are going to be exported as-is, into individual FlowFiles.",
+                    context.getControllerServiceLookup().getControllerServiceName(context.getProperty(SCHEMA_SERVICE).getValue())));
             schemaAccessStrategy = null;
         }
         final CodecFactory   codecFactory = getCodecFactory(context.getProperty(AVRO_CODEC).getValue());
