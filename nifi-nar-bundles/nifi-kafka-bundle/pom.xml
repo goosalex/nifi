@@ -21,7 +21,7 @@
     </parent>
     <artifactId>nifi-kafka-bundle</artifactId>
     <packaging>pom</packaging>
-    <version>1.11.5-AVRO-SNAPSHOT</version>
+    <version>1.11.4-AVRO-SNAPSHOT</version>
     <properties>
       <kafka8.version>0.8.2.2</kafka8.version>
       <kafka9.version>0.9.0.1</kafka9.version>
@@ -29,6 +29,8 @@
       <kafka11.version>0.11.0.3</kafka11.version>
       <kafka1.0.version>1.0.2</kafka1.0.version>
       <kafka2.0.version>2.0.0</kafka2.0.version>
+      <kafka2.6.version>2.6.0</kafka2.6.version>
+
     </properties>
 
     <modules>
@@ -38,12 +40,14 @@
         <module>nifi-kafka-0-11-processors</module>
         <module>nifi-kafka-1-0-processors</module>
         <module>nifi-kafka-2-0-processors</module>
+        <module>nifi-kafka-2-6-processors</module>
         <module>nifi-kafka-0-8-nar</module>
         <module>nifi-kafka-0-9-nar</module>
         <module>nifi-kafka-0-10-nar</module>
         <module>nifi-kafka-0-11-nar</module>
         <module>nifi-kafka-1-0-nar</module>
         <module>nifi-kafka-2-0-nar</module>
+        <module>nifi-kafka-2-6-nar</module>
     </modules>
     <dependencyManagement>
         <dependencies>

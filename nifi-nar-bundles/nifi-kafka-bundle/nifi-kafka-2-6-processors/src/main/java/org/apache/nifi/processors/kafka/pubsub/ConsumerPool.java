@@ -74,13 +74,14 @@ public class ConsumerPool implements Closeable {
      * initialized. We may elect to not create up to the maximum number of
      * configured consumers if the broker reported lag time for all topics is
      * below a certain threshold.
-     *  @param maxConcurrentLeases max allowable consumers at once
+     *
+     * @param maxConcurrentLeases max allowable consumers at once
      * @param demarcator bytes to use as demarcator between messages; null or
      * empty means no demarcator
      * @param kafkaProperties properties to use to initialize kafka consumers
      * @param topics the topics to subscribe to
      * @param maxWaitMillis maximum time to wait for a given lease to acquire
-* data before committing
+     * data before committing
      * @param maxPollRecords
      * @param keyEncoding the encoding to use for the key of a kafka message if
      * found
@@ -381,7 +382,7 @@ public class ConsumerPool implements Closeable {
         return new PoolStats(consumerCreatedCountRef.get(), consumerClosedCountRef.get(), leasesObtainedCountRef.get());
     }
 
-   private class SimpleConsumerLease extends ConsumerLease {
+    private class SimpleConsumerLease extends ConsumerLease {
 
         private final Consumer<byte[], byte[]> consumer;
         private volatile ProcessSession session;

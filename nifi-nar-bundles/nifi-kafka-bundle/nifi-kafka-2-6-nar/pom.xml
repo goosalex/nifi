@@ -19,9 +19,9 @@
         <artifactId>nifi-kafka-bundle</artifactId>
         <version>1.11.4-AVRO-SNAPSHOT</version>
     </parent>
-    <artifactId>nifi-kafka-2-0-nar</artifactId>
+    <artifactId>nifi-kafka-2-6-nar</artifactId>
     <packaging>nar</packaging>
-    <description>NiFi NAR for interacting with Apache Kafka 2.0</description>
+    <description>NiFi NAR for interacting with Apache Kafka 2.6</description>
     <properties>
         <maven.javadoc.skip>true</maven.javadoc.skip>
         <source.skip>true</source.skip>
@@ -29,7 +29,8 @@
     <dependencies>
         <dependency>
             <groupId>org.apache.nifi</groupId>
-            <artifactId>nifi-kafka-2-0-processors</artifactId>
+            <artifactId>nifi-kafka-2-6-processors</artifactId>
+            <version>1.11.4-AVRO-SNAPSHOT</version>
         </dependency>
         <dependency>
             <groupId>org.apache.nifi</groupId>
