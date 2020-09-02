@@ -30,6 +30,7 @@ import org.apache.nifi.flowfile.attributes.CoreAttributes;
 import org.apache.nifi.logging.ComponentLog;
 import org.apache.nifi.processor.ProcessSession;
 import org.apache.nifi.processor.exception.ProcessException;
+import org.apache.nifi.schema.access.SchemaNotFoundException;
 import org.apache.nifi.serialization.MalformedRecordException;
 import org.apache.nifi.serialization.RecordReader;
 import org.apache.nifi.serialization.RecordReaderFactory;
@@ -39,6 +40,7 @@ import org.apache.nifi.serialization.SchemaValidationException;
 import org.apache.nifi.serialization.WriteResult;
 import org.apache.nifi.serialization.record.Record;
 import org.apache.nifi.serialization.record.RecordSchema;
+import org.apache.nifi.schema.access.SchemaAccessStrategy;
 
 import javax.xml.bind.DatatypeConverter;
 import java.io.ByteArrayInputStream;
@@ -46,6 +48,7 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -63,6 +66,12 @@ import static org.apache.nifi.processors.kafka.pubsub.ConsumeKafkaRecord_2_6.REL
 import static org.apache.nifi.processors.kafka.pubsub.KafkaProcessorUtils.HEX_ENCODING;
 import static org.apache.nifi.processors.kafka.pubsub.KafkaProcessorUtils.UTF8_ENCODING;
 
+import org.apache.avro.Schema;
+import org.apache.avro.file.CodecFactory;
+import org.apache.avro.file.DataFileWriter;
+import org.apache.avro.generic.GenericDatumWriter;
+import org.apache.avro.generic.GenericRecord;
+
 /**
  * This class represents a lease to access a Kafka Consumer object. The lease is
  * intended to be obtained from a ConsumerPool. The lease is closeable to allow
@@ -73,6 +82,7 @@ import static org.apache.nifi.processors.kafka.pubsub.KafkaProcessorUtils.UTF8_E
 public abstract class ConsumerLease implements Closeable, ConsumerRebalanceListener {
 
     private final long maxWaitMillis;
+    private final int  maxPollRecords;
     private final Consumer<byte[], byte[]> kafkaConsumer;
     private final ComponentLog logger;
     private final byte[] demarcatorBytes;
@@ -81,6 +91,8 @@ public abstract class ConsumerLease implements Closeable, ConsumerRebalanceListe
     private final String bootstrapServers;
     private final RecordSetWriterFactory writerFactory;
     private final RecordReaderFactory readerFactory;
+    private final SchemaAccessStrategy schemaRegistryService;
+    private final CodecFactory avroCodec;
     private final Charset headerCharacterSet;
     private final Pattern headerNamePattern;
     private boolean poisoned = false;
@@ -94,6 +106,7 @@ public abstract class ConsumerLease implements Closeable, ConsumerRebalanceListe
 
     ConsumerLease(
             final long maxWaitMillis,
+            final int maxPollRecords,
             final Consumer<byte[], byte[]> kafkaConsumer,
             final byte[] demarcatorBytes,
             final String keyEncoding,
@@ -102,9 +115,12 @@ public abstract class ConsumerLease implements Closeable, ConsumerRebalanceListe
             final RecordReaderFactory readerFactory,
             final RecordSetWriterFactory writerFactory,
             final ComponentLog logger,
+            final SchemaAccessStrategy schemaRegistryService,
+            final CodecFactory avroCodec,
             final Charset headerCharacterSet,
             final Pattern headerNamePattern) {
         this.maxWaitMillis = maxWaitMillis;
+        this.maxPollRecords = maxPollRecords;
         this.kafkaConsumer = kafkaConsumer;
         this.demarcatorBytes = demarcatorBytes;
         this.keyEncoding = keyEncoding;
@@ -113,6 +129,8 @@ public abstract class ConsumerLease implements Closeable, ConsumerRebalanceListe
         this.readerFactory = readerFactory;
         this.writerFactory = writerFactory;
         this.logger = logger;
+        this.schemaRegistryService = schemaRegistryService;
+        this.avroCodec = avroCodec;
         this.headerCharacterSet = headerCharacterSet;
         this.headerNamePattern = headerNamePattern;
     }
@@ -174,7 +192,7 @@ public abstract class ConsumerLease implements Closeable, ConsumerRebalanceListe
          * This behavior has been fixed via Kafka KIP-62 and available from Kafka client 0.10.1.0.
          */
         try {
-            final ConsumerRecords<byte[], byte[]> records = kafkaConsumer.poll(10);
+            final ConsumerRecords<byte[], byte[]> records = kafkaConsumer.poll(maxWaitMillis);
             lastPollEmpty = records.count() == 0;
             processRecords(records);
         } catch (final ProcessException pe) {
@@ -268,7 +286,7 @@ public abstract class ConsumerLease implements Closeable, ConsumerRebalanceListe
         if (bundleMap.size() > 200) { //a magic number - the number of simultaneous bundles to track
             return false;
         } else {
-            return totalMessages < 1000;//admittedlly a magic number - good candidate for processor property
+            return totalMessages < maxPollRecords;
         }
     }
 
@@ -329,7 +347,10 @@ public abstract class ConsumerLease implements Closeable, ConsumerRebalanceListe
                     writeDemarcatedData(getProcessSession(), messages, partition);
                 } else if (readerFactory != null && writerFactory != null) {
                     writeRecordData(getProcessSession(), messages, partition);
-                } else {
+                } else if (schemaRegistryService != null){
+                    writeAvroData(getProcessSession(), messages, partition);
+                }
+                else {
                     messages.stream().forEach(message -> {
                         writeData(getProcessSession(), message, partition);
                     });
@@ -368,6 +389,7 @@ public abstract class ConsumerLease implements Closeable, ConsumerRebalanceListe
 
     private boolean processBundle(final BundleTracker bundle) throws IOException {
         final RecordSetWriter writer = bundle.recordWriter;
+        final DataFileWriter avroWriter = bundle.avroFileWriter;
         if (writer != null) {
             final WriteResult writeResult;
 
@@ -387,6 +409,22 @@ public abstract class ConsumerLease implements Closeable, ConsumerRebalanceListe
             attributes.put(CoreAttributes.MIME_TYPE.key(), writer.getMimeType());
 
             bundle.flowFile = getProcessSession().putAllAttributes(bundle.flowFile, attributes);
+        } else if (avroWriter != null){
+
+            avroWriter.flush();
+            avroWriter.close();
+            if (bundle.totalRecords == 0L){
+                getProcessSession().remove(bundle.flowFile);
+                return false;
+
+            }
+            final Map<String, String> attributes = new HashMap<>();
+            attributes.put("record.count", Long.toString(bundle.totalRecords));
+            attributes.put(CoreAttributes.MIME_TYPE.key(), "avro/binary");
+
+            bundle.flowFile = getProcessSession().putAllAttributes(bundle.flowFile, attributes);
+
+
         }
 
         populateAttributes(bundle);
@@ -408,6 +446,94 @@ public abstract class ConsumerLease implements Closeable, ConsumerRebalanceListe
         populateAttributes(tracker);
         session.transfer(tracker.flowFile, REL_SUCCESS);
     }
+
+    private void writeAvroData(ProcessSession session, List<ConsumerRecord<byte[],byte[]>> records, TopicPartition partition)  {
+        // new SimpleRecordSchema
+        // SchemaAccessStrategy
+        final Map<String,String> emptyMap = new HashMap<String,String>();
+
+        // Group the Records by their BundleInformation -> their Schema
+        final Map<BundleInformation, List<ConsumerRecord<byte[], byte[]>>> map = records.stream()
+                .collect(Collectors.groupingBy(rec -> {
+                    try {
+                        return new BundleInformation(partition,
+                                schemaRegistryService.getSchema(emptyMap, new ByteArrayInputStream(rec.value()), null)
+                                , getAttributes(rec));
+                    } catch (SchemaNotFoundException e) {
+                        handleParseFailure(rec, session, e);
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                    // Group under a null Schema @TODO: better discard these messages;
+                    return new BundleInformation(partition, null, getAttributes(rec));
+                }));
+
+        // produce a FlowFile containing a Avro DataFile. One FlowFile per Partition and Schema.
+        for (final Map.Entry<BundleInformation, List<ConsumerRecord<byte[], byte[]>>> entry : map.entrySet()) {
+            final BundleInformation bundleInfo = entry.getKey();
+            final List<ConsumerRecord<byte[], byte[]>> recordList = entry.getValue();
+
+            final boolean demarcateFirstRecord;
+
+            BundleTracker tracker = bundleMap.get(bundleInfo);
+
+            FlowFile flowFile;
+            if (tracker == null) {
+
+                flowFile = session.create();
+                flowFile = session.putAllAttributes(flowFile, bundleInfo.attributes);
+                final OutputStream rawOut = session.write(flowFile);
+
+                Schema schema = new Schema.Parser().parse(bundleInfo.schema.getSchemaText().get());
+                final GenericDatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<>(schema);
+                final DataFileWriter<GenericRecord> dataFileWriter;
+                dataFileWriter = new DataFileWriter<>(datumWriter);
+                dataFileWriter.setCodec(this.avroCodec);
+                try {
+                    dataFileWriter.create(schema, rawOut);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+                tracker = new BundleTracker(recordList.get(0), partition, keyEncoding, dataFileWriter);
+
+                tracker.updateFlowFile(flowFile);
+            }
+            flowFile = tracker.flowFile;
+
+            tracker.incrementRecordCount(recordList.size());
+            final DataFileWriter<GenericRecord> avroWriter = tracker.avroFileWriter;
+//            flowFile = session.append(flowFile, out -> {
+
+                for (final ConsumerRecord<byte[], byte[]> record : recordList) {
+
+                    final byte[] value = record.value();
+                    InputStream in = new ByteArrayInputStream(value);
+                    if (value != null) {
+                        // consume Schema Bytes
+                        try {
+                            schemaRegistryService.getSchema(emptyMap, in, null);
+                            byte[] remainingBytes = new byte[in.available()];
+                            in.read(remainingBytes);
+                            avroWriter.appendEncoded(ByteBuffer.wrap(remainingBytes));
+                        } catch (SchemaNotFoundException | IOException e) {
+                            handleParseFailure(record, session,e);
+                        }
+
+//                        out.write(record.value());
+                    }
+
+                }
+//          });
+
+//            tracker.updateFlowFile(flowFile);
+            bundleMap.put(bundleInfo, tracker);
+
+        }
+
+
+
+    }
+
 
     private void writeDemarcatedData(final ProcessSession session, final List<ConsumerRecord<byte[], byte[]>> records, final TopicPartition topicPartition) {
         // Group the Records by their BundleInformation
@@ -655,12 +781,19 @@ public abstract class ConsumerLease implements Closeable, ConsumerRebalanceListe
         final String topic;
         final String key;
         final RecordSetWriter recordWriter;
+        DataFileWriter avroFileWriter;
         FlowFile flowFile;
         long totalRecords = 0;
 
         private BundleTracker(final ConsumerRecord<byte[], byte[]> initialRecord, final TopicPartition topicPartition, final String keyEncoding) {
-            this(initialRecord, topicPartition, keyEncoding, null);
+            this(initialRecord, topicPartition, keyEncoding, (RecordSetWriter) null);
         }
+
+        private BundleTracker(final ConsumerRecord<byte[], byte[]> initialRecord, final TopicPartition topicPartition, final String keyEncoding, final DataFileWriter avroFileWriter) {
+            this(initialRecord, topicPartition, keyEncoding, (RecordSetWriter)null);
+            this.avroFileWriter = avroFileWriter;
+        }
+
 
         private BundleTracker(final ConsumerRecord<byte[], byte[]> initialRecord, final TopicPartition topicPartition, final String keyEncoding, final RecordSetWriter recordWriter) {
             this.initialOffset = initialRecord.offset();

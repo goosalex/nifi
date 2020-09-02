@@ -102,7 +102,8 @@ public abstract class ConsumerLease implements Closeable, ConsumerRebalanceListe
 
     ConsumerLease(
             final long maxWaitMillis,
-            int maxPollRecords, final Consumer<byte[], byte[]> kafkaConsumer,
+            final int maxPollRecords,
+            final Consumer<byte[], byte[]> kafkaConsumer,
             final byte[] demarcatorBytes,
             final String keyEncoding,
             final String securityProtocol,
@@ -281,7 +282,7 @@ public abstract class ConsumerLease implements Closeable, ConsumerRebalanceListe
         if (bundleMap.size() > 200) { //a magic number - the number of simultaneous bundles to track
             return false;
         } else {
-            return totalMessages < maxPollRecords;//admittedlly a magic number - good candidate for processor property
+            return totalMessages < maxPollRecords;
         }
     }
 

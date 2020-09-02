@@ -16,12 +16,14 @@
  */
 package org.apache.nifi.processors.kafka.pubsub;
 
+import org.apache.avro.file.CodecFactory;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.KafkaException;
 import org.apache.nifi.logging.ComponentLog;
 import org.apache.nifi.processor.ProcessContext;
 import org.apache.nifi.processor.ProcessSession;
+import org.apache.nifi.schema.access.SchemaAccessStrategy;
 import org.apache.nifi.serialization.RecordReaderFactory;
 import org.apache.nifi.serialization.RecordSetWriterFactory;
 
@@ -44,13 +46,16 @@ import java.util.regex.Pattern;
  */
 public class ConsumerPool implements Closeable {
 
+    private final CodecFactory avroCodec;
     private final BlockingQueue<SimpleConsumerLease> pooledLeases;
     private final List<String> topics;
     private final Pattern topicPattern;
     private final Map<String, Object> kafkaProperties;
     private final long maxWaitMillis;
+    private final int  maxPollRecords;
     private final ComponentLog logger;
     private final byte[] demarcatorBytes;
+    private final SchemaAccessStrategy schemaRegistryService;
     private final String keyEncoding;
     private final String securityProtocol;
     private final String bootstrapServers;
@@ -77,6 +82,7 @@ public class ConsumerPool implements Closeable {
      * @param topics the topics to subscribe to
      * @param maxWaitMillis maximum time to wait for a given lease to acquire
      * data before committing
+     * @param maxPollRecords
      * @param keyEncoding the encoding to use for the key of a kafka message if
      * found
      * @param securityProtocol the security protocol used
@@ -89,6 +95,7 @@ public class ConsumerPool implements Closeable {
             final Map<String, Object> kafkaProperties,
             final List<String> topics,
             final long maxWaitMillis,
+            final int maxPollRecords,
             final String keyEncoding,
             final String securityProtocol,
             final String bootstrapServers,
@@ -98,8 +105,79 @@ public class ConsumerPool implements Closeable {
             final Pattern headerNamePattern) {
         this.pooledLeases = new ArrayBlockingQueue<>(maxConcurrentLeases);
         this.maxWaitMillis = maxWaitMillis;
+        this.maxPollRecords = maxPollRecords;
         this.logger = logger;
         this.demarcatorBytes = demarcator;
+        this.keyEncoding = keyEncoding;
+        this.securityProtocol = securityProtocol;
+        this.bootstrapServers = bootstrapServers;
+        this.kafkaProperties = Collections.unmodifiableMap(kafkaProperties);
+        this.topics = Collections.unmodifiableList(topics);
+        this.topicPattern = null;
+        this.readerFactory = null;
+        this.writerFactory = null;
+        this.honorTransactions = honorTransactions;
+        this.headerCharacterSet = headerCharacterSet;
+        this.headerNamePattern = headerNamePattern;
+        this.schemaRegistryService = null;
+        this.avroCodec = null;
+    }
+
+    public ConsumerPool(
+            final int maxConcurrentLeases,
+            final byte[] demarcator,
+            final Map<String, Object> kafkaProperties,
+            final Pattern topics,
+            final long maxWaitMillis,
+            final int maxPollRecords,
+            final String keyEncoding,
+            final String securityProtocol,
+            final String bootstrapServers,
+            final ComponentLog logger,
+            final boolean honorTransactions,
+            final Charset headerCharacterSet,
+            final Pattern headerNamePattern) {
+        this.pooledLeases = new ArrayBlockingQueue<>(maxConcurrentLeases);
+        this.maxWaitMillis = maxWaitMillis;
+        this.maxPollRecords = maxPollRecords;
+        this.logger = logger;
+        this.demarcatorBytes = demarcator;
+        this.keyEncoding = keyEncoding;
+        this.securityProtocol = securityProtocol;
+        this.bootstrapServers = bootstrapServers;
+        this.kafkaProperties = Collections.unmodifiableMap(kafkaProperties);
+        this.topics = null;
+        this.topicPattern = topics;
+        this.readerFactory = null;
+        this.writerFactory = null;
+        this.honorTransactions = honorTransactions;
+        this.headerCharacterSet = headerCharacterSet;
+        this.headerNamePattern = headerNamePattern;
+        this.schemaRegistryService = null;
+        this.avroCodec = null;
+    }
+
+    public ConsumerPool(
+            final int maxConcurrentLeases,
+            final SchemaAccessStrategy schemaRegistryService,
+            final CodecFactory avroCodec,
+            final Map<String, Object> kafkaProperties,
+            final List<String> topics,
+            final long maxWaitMillis,
+            int maxPollRecords, final String keyEncoding,
+            final String securityProtocol,
+            final String bootstrapServers,
+            final ComponentLog logger,
+            final boolean honorTransactions,
+            final Charset headerCharacterSet,
+            final Pattern headerNamePattern) {
+        this.avroCodec = avroCodec;
+        this.pooledLeases = new ArrayBlockingQueue<>(maxConcurrentLeases);
+        this.maxWaitMillis = maxWaitMillis;
+        this.maxPollRecords = maxPollRecords;
+        this.logger = logger;
+        this.demarcatorBytes = null;
+        this.schemaRegistryService = schemaRegistryService;
         this.keyEncoding = keyEncoding;
         this.securityProtocol = securityProtocol;
         this.bootstrapServers = bootstrapServers;
@@ -115,21 +193,25 @@ public class ConsumerPool implements Closeable {
 
     public ConsumerPool(
             final int maxConcurrentLeases,
-            final byte[] demarcator,
+            final SchemaAccessStrategy schemaRegistryService,
+            final CodecFactory avroCodec,
             final Map<String, Object> kafkaProperties,
             final Pattern topics,
             final long maxWaitMillis,
-            final String keyEncoding,
+            int maxPollRecords, final String keyEncoding,
             final String securityProtocol,
             final String bootstrapServers,
             final ComponentLog logger,
             final boolean honorTransactions,
             final Charset headerCharacterSet,
             final Pattern headerNamePattern) {
+        this.avroCodec = avroCodec;
         this.pooledLeases = new ArrayBlockingQueue<>(maxConcurrentLeases);
         this.maxWaitMillis = maxWaitMillis;
+        this.maxPollRecords = maxPollRecords;
         this.logger = logger;
-        this.demarcatorBytes = demarcator;
+        this.demarcatorBytes = null;
+        this.schemaRegistryService = schemaRegistryService;
         this.keyEncoding = keyEncoding;
         this.securityProtocol = securityProtocol;
         this.bootstrapServers = bootstrapServers;
@@ -150,6 +232,7 @@ public class ConsumerPool implements Closeable {
             final Map<String, Object> kafkaProperties,
             final Pattern topics,
             final long maxWaitMillis,
+            final int maxPollRecords,
             final String securityProtocol,
             final String bootstrapServers,
             final ComponentLog logger,
@@ -158,8 +241,11 @@ public class ConsumerPool implements Closeable {
             final Pattern headerNamePattern) {
         this.pooledLeases = new ArrayBlockingQueue<>(maxConcurrentLeases);
         this.maxWaitMillis = maxWaitMillis;
+        this.maxPollRecords = maxPollRecords;
         this.logger = logger;
         this.demarcatorBytes = null;
+        this.schemaRegistryService = null;
+        this.avroCodec = null;
         this.keyEncoding = null;
         this.readerFactory = readerFactory;
         this.writerFactory = writerFactory;
@@ -180,6 +266,7 @@ public class ConsumerPool implements Closeable {
             final Map<String, Object> kafkaProperties,
             final List<String> topics,
             final long maxWaitMillis,
+            final int maxPollRecords,
             final String securityProtocol,
             final String bootstrapServers,
             final ComponentLog logger,
@@ -188,8 +275,11 @@ public class ConsumerPool implements Closeable {
             final Pattern headerNamePattern) {
         this.pooledLeases = new ArrayBlockingQueue<>(maxConcurrentLeases);
         this.maxWaitMillis = maxWaitMillis;
+        this.maxPollRecords = maxPollRecords;
         this.logger = logger;
         this.demarcatorBytes = null;
+        this.schemaRegistryService = null;
+        this.avroCodec = null;
         this.keyEncoding = null;
         this.readerFactory = readerFactory;
         this.writerFactory = writerFactory;
@@ -300,8 +390,8 @@ public class ConsumerPool implements Closeable {
         private volatile boolean closedConsumer;
 
         private SimpleConsumerLease(final Consumer<byte[], byte[]> consumer) {
-            super(maxWaitMillis, consumer, demarcatorBytes, keyEncoding, securityProtocol, bootstrapServers,
-                readerFactory, writerFactory, logger, headerCharacterSet, headerNamePattern);
+            super(maxWaitMillis, maxPollRecords, consumer, demarcatorBytes, keyEncoding, securityProtocol, bootstrapServers,
+                readerFactory, writerFactory, logger, schemaRegistryService, avroCodec, headerCharacterSet, headerNamePattern);
             this.consumer = consumer;
         }
 

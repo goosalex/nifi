@@ -94,7 +94,8 @@ public class ConsumerPool implements Closeable {
             final Map<String, Object> kafkaProperties,
             final List<String> topics,
             final long maxWaitMillis,
-            int maxPollRecords, final String keyEncoding,
+            final int maxPollRecords,
+            final String keyEncoding,
             final String securityProtocol,
             final String bootstrapServers,
             final ComponentLog logger,
@@ -127,7 +128,8 @@ public class ConsumerPool implements Closeable {
             final Map<String, Object> kafkaProperties,
             final Pattern topics,
             final long maxWaitMillis,
-            int maxPollRecords, final String keyEncoding,
+            final int maxPollRecords,
+            final String keyEncoding,
             final String securityProtocol,
             final String bootstrapServers,
             final ComponentLog logger,
@@ -229,7 +231,8 @@ public class ConsumerPool implements Closeable {
             final Map<String, Object> kafkaProperties,
             final Pattern topics,
             final long maxWaitMillis,
-            int maxPollRecords, final String securityProtocol,
+            final int maxPollRecords,
+            final String securityProtocol,
             final String bootstrapServers,
             final ComponentLog logger,
             final boolean honorTransactions,
@@ -262,7 +265,8 @@ public class ConsumerPool implements Closeable {
             final Map<String, Object> kafkaProperties,
             final List<String> topics,
             final long maxWaitMillis,
-            int maxPollRecords, final String securityProtocol,
+            final int maxPollRecords,
+            final String securityProtocol,
             final String bootstrapServers,
             final ComponentLog logger,
             final boolean honorTransactions,
@@ -377,15 +381,7 @@ public class ConsumerPool implements Closeable {
         return new PoolStats(consumerCreatedCountRef.get(), consumerClosedCountRef.get(), leasesObtainedCountRef.get());
     }
 
-    private class AvroConsumerLease extends SimpleConsumerLease{
-
-        private AvroConsumerLease(Consumer<byte[], byte[]> consumer) {
-            super(consumer);
-        }
-    }
-
-
-    private class SimpleConsumerLease extends ConsumerLease {
+   private class SimpleConsumerLease extends ConsumerLease {
 
         private final Consumer<byte[], byte[]> consumer;
         private volatile ProcessSession session;
