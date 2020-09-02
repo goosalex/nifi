@@ -16,3 +16,4 @@ org.apache.nifi.processors.kafka.pubsub.PublishKafka_2_0
 org.apache.nifi.processors.kafka.pubsub.PublishKafkaRecord_2_0
 org.apache.nifi.processors.kafka.pubsub.ConsumeKafka_2_0
 org.apache.nifi.processors.kafka.pubsub.ConsumeKafkaRecord_2_0
+org.apache.nifi.processors.kafka.pubsub.ConsumeKafkaAvro_2_0
