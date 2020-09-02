@@ -694,7 +694,7 @@ public class JettyServer implements NiFiServer, ExtensionUiLoader {
         if (maxRequestSize > 0) {
             addContentLengthFilter(path, webAppContext, maxRequestSize);
         } else {
-            logger.info("Not adding content-length filter because {} is not set in nifi.properties", NiFiProperties.WEB_MAX_CONTENT_SIZE);
+            logger.debug("Not adding content-length filter because {} is not set in nifi.properties", NiFiProperties.WEB_MAX_CONTENT_SIZE);
         }
     }
 
@@ -736,7 +736,7 @@ public class JettyServer implements NiFiServer, ExtensionUiLoader {
                 logger.debug("Parsed max content length as {} bytes", configuredMaxRequestSize);
                 return configuredMaxRequestSize;
             } else {
-                logger.info("Can't parse valid max content length from {}", webMaxContentSize);
+                logger.debug("{} read from nifi.properties is empty", NiFiProperties.WEB_MAX_CONTENT_SIZE);
             }
         } catch (final IllegalArgumentException e) {
             logger.warn("Exception parsing property {}; disabling content length filter", NiFiProperties.WEB_MAX_CONTENT_SIZE);
@@ -975,19 +975,13 @@ public class JettyServer implements NiFiServer, ExtensionUiLoader {
     }
 
     private SslContextFactory createSslContextFactory() {
-        final SslContextFactory contextFactory = new SslContextFactory();
-        configureSslContextFactory(contextFactory, props);
-        return contextFactory;
+        final SslContextFactory.Server serverContextFactory = new SslContextFactory.Server();
+        configureSslContextFactory(serverContextFactory, props);
+        return serverContextFactory;
     }
 
-    protected static void configureSslContextFactory(SslContextFactory contextFactory, NiFiProperties props) {
-        // Need to set SslContextFactory's endpointIdentificationAlgorithm to null; this is a server,
-        // not a client.  Server does not need to perform hostname verification on the client.
-        // Previous to Jetty 9.4.15.v20190215, this defaulted to null, and now defaults to "HTTPS".
-        contextFactory.setEndpointIdentificationAlgorithm(null);
-
+    protected static void configureSslContextFactory(SslContextFactory.Server contextFactory, NiFiProperties props) {
         // Explicitly exclude legacy TLS protocol versions
-        // contextFactory.setProtocol(CertificateUtils.getHighestCurrentSupportedTlsProtocolVersion());
         contextFactory.setIncludeProtocols(CertificateUtils.getCurrentSupportedTlsProtocolVersions());
         contextFactory.setExcludeProtocols("TLS", "TLSv1", "TLSv1.1", "SSL", "SSLv2", "SSLv2Hello", "SSLv3");
 
